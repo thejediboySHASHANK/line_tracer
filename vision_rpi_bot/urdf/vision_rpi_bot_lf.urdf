@@ -236,6 +236,7 @@
 
   <gazebo reference="camera_link">
     <sensor type="camera" name="vision_rpi_bot_camera">
+      <!-- <visualize>true</visualize> -->
       <update_rate>30.0</update_rate>
       <camera name="head">
         <horizontal_fov>1.3962634</horizontal_fov>

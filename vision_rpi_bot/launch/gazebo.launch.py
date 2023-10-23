@@ -6,7 +6,7 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     package_share_dir = get_package_share_directory("vision_rpi_bot")
-    urdf_file_path = os.path.join(package_share_dir, "urdf","vision_rpi_bot.urdf")
+    urdf_file_path = os.path.join(package_share_dir, "urdf","vision_rpi_bot_lf.urdf")
     urdf = open(urdf_file_path).read()
 
 
