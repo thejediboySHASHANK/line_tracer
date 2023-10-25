@@ -4,20 +4,49 @@ from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 import cv2
 import numpy as np
+from geometry_msgs.msg import Twist
 
 class camera_sub(Node):
 
     def __init__(self):
         super().__init__('qr_maze_solving_node')
         self.camera_sub = self.create_subscription(Image, '/vision_rpi_bot_camera/image_raw', self.camera_cb, 10)
-        self.bridge = CvBridge()
+        self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
+        self.vel_msg=Twist()
+        self.bridge = CvBridge()    
+
+    # def Motor_Steer (self, speed, steering):
+    #     if steering == 0:
+    #         self.vel_msg.linear.x = speed
+    #         return 
+    #     elif steering > 0:
+    #         steering = 100 - steering
+
+    #         self.vel_msg.linear.x = speed
+    #         self.vel_msg.angular.z = -(speed*steering/100)
+
+    #         return
+    #     elif steering < 0:
+    #         steering = steering * -1
+    #         steering = 100 - steering
+
+    #         self.vel_msg.linear.x = speed
+    #         self.vel_msg.angular.z = (speed*steering/100)
+
+    #         return 
+
         
 
     def camera_cb(self, data):
         x_last = 320
         y_last = 180
 
+        kp = 1.75
+        ap = 3
+
         camera = self.bridge.imgmsg_to_cv2(data, 'bgr8')
+        # camera = cv2.resize(camera, (320, 200))
+        # print("Camera resolution: {} x {}".format(camera.shape[1], camera.shape[0]))
         Blackline = cv2.inRange(camera, (0,0,0), (60,60,60))
         Greensign = cv2.inRange(camera, (0, 65, 0), (100, 200, 100))
         kernel = np.ones((3, 3), np.uint8)
@@ -106,6 +135,29 @@ class camera_sub(Node):
                 ang = 90 - ang
             if (ang > 90) :
                 ang = 180 - ang
+        
+            speed = 0.6
+            steering = (error*kp) + (ang * ap)
+
+            if steering == 0:
+                self.vel_msg.linear.x = speed #straight
+             
+            elif steering > 0:
+                steering = 100 - steering
+
+                self.vel_msg.linear.x = speed
+                self.vel_msg.angular.z = (speed*steering/100) #z is for turning
+
+                
+            elif steering < 0:
+                steering = steering * -1
+                steering = 100 - steering
+
+                self.vel_msg.linear.x = speed
+                self.vel_msg.angular.z = -(speed*steering/100)
+
+            self.cmd_vel_pub.publish(self.vel_msg)
+            
             box = cv2.boxPoints(blackbox)
             box = np.int0(box)
             cv2.drawContours(camera,[box],0,(0,0,255),3)	 
