@@ -1,58 +1,95 @@
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image
-from geometry_msgs.msg import Twist
 from cv_bridge import CvBridge
 import cv2
+import numpy as np
 
 class camera_sub(Node):
 
     def __init__(self):
         super().__init__('qr_maze_solving_node')
-        self.camera_sub = self.create_subscription(Image,'/vision_rpi_bot_camera/image_raw',self.camera_cb,10)
-        self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
-        self.vel_msg=Twist()
-        self.bridge=CvBridge()
-
-
+        self.camera_sub = self.create_subscription(Image, '/vision_rpi_bot_camera/image_raw', self.camera_cb, 10)
+        self.bridge = CvBridge()
 
     def camera_cb(self, data):
-        frame = self.bridge.imgmsg_to_cv2(data,'bgr8')
-        frame = frame[290:479,130:400] # First is Y and sencond is X
-        edged = cv2.Canny(frame ,60,100 )
-
-        white_index=[]
-        mid_point_line = 0
-        for index,values in enumerate(edged[:][172]):
-            if(values == 255):
-                white_index.append(index)
-        print(white_index)
-
-        if(len(white_index) == 2 ):
-            cv2.circle(img=edged, center = (white_index[0],172), radius = 2 , color = (255,0,0), thickness=1)
-            cv2.circle(img=edged, center = (white_index[1],172), radius = 2 , color = (255,0,0), thickness=1)
-            mid_point_line = int ( (white_index[0] + white_index[1]) /2 )
-            cv2.circle(img=edged, center = (mid_point_line,172), radius = 3 , color = (255,0,0), thickness=2)
-
-        mid_point_robot = [135,172]
-        cv2.circle(img=edged, center = (mid_point_robot[0],mid_point_robot[1]), radius = 5 , color = (255,0,0), thickness=2)
-        error = mid_point_robot[0] - mid_point_line
-        print("Error -> " , error)
-
-        if ( error < 0):
-            self.vel_msg.angular.z = -0.5
+        camera = self.bridge.imgmsg_to_cv2(data, 'bgr8')
+        Blackline = cv2.inRange(camera, (0,0,0), (60,60,60))
+        Greensign = cv2.inRange(camera, (0, 65, 0), (100, 200, 100))
+        kernel = np.ones((3, 3), np.uint8)
+        Blackline = cv2.erode(Blackline, kernel, iterations=5)
+        Blackline = cv2.dilate(Blackline, kernel, iterations=9)
+        Greensign = cv2.erode(Greensign, kernel, iterations=5)
+        Greensign = cv2.dilate(Greensign, kernel, iterations=9)	
+        # img_blk,contours_blk, hierarchy_blk = cv2.findContours(Blackline.copy(),cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
+        
+        contours = []
+        if int(cv2.__version__[0]) >= 4:
+            contours, _ = cv2.findContours(Blackline.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         else:
-            self.vel_msg.angular.z = 0.5
+            _, contours, _ = cv2.findContours(Blackline.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
-        self.vel_msg.linear.x = 0.4
+        contours_blk = []
+        if int(cv2.__version__[0]) >= 4:
+            contours_blk, _ = cv2.findContours(Blackline.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        else:
+            _, contours_blk, _ = cv2.findContours(Blackline.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
-        self.cmd_vel_pub.publish(self.vel_msg)
+        contours_grn = []
+        if int(cv2.__version__[0]) >= 4:
+            contours_grn, _ = cv2.findContours(Greensign.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        else:
+            _, contours_grn, _ = cv2.findContours(Greensign.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
+        Greendected = False  # Initialize the variable
 
-        cv2.imshow('Frame',frame)
-        cv2.imshow('Canny Output',edged)
+        if len(contours_grn) > 0:
+            Greendected = True	
+            x_grn, y_grn, w_grn, h_grn = cv2.boundingRect(contours_grn[0])
+            centerx_grn = x_grn + (w_grn/2)	   
+            cv2.line(camera, (int(centerx_grn), 200), (int(centerx_grn), 250), (0, 0, 255), 3)
+
+        if len(contours_blk) > 0:
+            x_blk, y_blk, w_blk, h_blk = cv2.boundingRect(contours_blk[0])
+            centerx_blk = x_blk + (w_blk/2)	  
+            #2nd addition 	   
+            blackbox = cv2.minAreaRect(contours_blk[0])
+            (x_min, y_min), (w_min, h_min), ang = blackbox
+            if ang < -45 :
+                ang = 90 + ang
+            if w_min < h_min and ang > 0:	  
+                ang = (90-ang)*-1
+            if w_min > h_min and ang < 0:
+                ang = 90 + ang
+            setpoint = 320
+            error = int(x_min - setpoint) 
+            ang = int(ang)	 
+            if (ang == 90) :
+                ang = ang - 1
+            if (ang < 90):
+                ang = 90 - ang
+            if (ang > 90) :
+                ang = 180 - ang
+            box = cv2.boxPoints(blackbox)
+            box = np.int0(box)
+            cv2.drawContours(camera,[box],0,(0,0,255),3)	 
+            cv2.putText(camera,str(ang),(10, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            cv2.putText(camera,str(error),(10, 320), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
+            cv2.line(camera, (int(x_min),200 ), (int(x_min),250 ), (255,0,0),3)
+
+        if Greendected: 
+            if centerx_grn > centerx_blk:
+                cv2.putText(camera, "Turn Right", (350, 180), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 0), 3)
+            else:
+                cv2.putText(camera, "Turn Left", (50, 180), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 0), 3)
+        # else:       
+        #     setpoint = 320
+        #     error = centerx_blk - setpoint
+        #     centertext = "Error = " + str(error)
+        #     cv2.putText(camera, centertext, (200, 340), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 0, 0), 3)
+
+        cv2.imshow("original with line", camera)
         cv2.waitKey(1)
-
 
 def main(args=None):
     rclpy.init(args=args)
@@ -63,9 +100,131 @@ def main(args=None):
     sensor_sub.destroy_node()
     rclpy.shutdown()
 
-
 if __name__ == '__main__':
     main()
+
+
+
+
+# import rclpy
+# from rclpy.node import Node
+# from sensor_msgs.msg import Image
+# from geometry_msgs.msg import Twist
+# from cv_bridge import CvBridge
+# import cv2
+# import numpy as np
+
+# class CameraSub(Node):
+
+#     def __init__(self):
+#         super().__init__('qr_maze_solving_node')
+#         self.camera_sub = self.create_subscription(Image, '/vision_rpi_bot_camera/image_raw', self.camera_cb, 10)
+#         self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
+#         self.vel_msg = Twist()
+#         self.bridge = CvBridge()
+#         self.frames = []  # stores the video sequence for the demo
+
+#     def camera_cb(self, data):
+#         frame = self.bridge.imgmsg_to_cv2(data, 'bgr8')
+#         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)  # Convert to grayscale
+#         h, w = gray.shape
+#         start_height = h - 5  # Scan index row 235
+
+#         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+#         thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+
+#         signed_thresh = thresh[start_height].astype(np.int16)
+#         diff = np.diff(signed_thresh)
+
+#         points = np.where(np.logical_or(diff > 200, diff < -200))
+
+#         if len(points) > 0 and len(points[0]) > 1:
+#             middle = (points[0][0] + points[0][1]) / 2
+
+#             error = middle - w / 2
+#             print("Error -> ", error)
+
+#             if error < 0:
+#                 self.vel_msg.angular.z = -0.5
+#             else:
+#                 self.vel_msg.angular.z = 0.5
+
+#             self.vel_msg.linear.x = 0.4
+#             self.cmd_vel_pub.publish(self.vel_msg)
+
+#         cv2.line(frame_rgb, (0, start_height), (w, start_height), (0, 255, 0), 1)
+
+#         cv2.imshow('Frame', frame)
+#         cv2.imshow('Threshold', thresh)
+#         cv2.waitKey(1)
+
+# def main(args=None):
+#     rclpy.init(args=args)
+#     sensor_sub = CameraSub()
+#     rclpy.spin(sensor_sub)
+#     sensor_sub.destroy_node()
+#     rclpy.shutdown()
+
+# if __name__ == '__main__':
+#     main()
+
+
+# import rclpy
+# from rclpy.node import Node
+# from sensor_msgs.msg import Image
+# from cv_bridge import CvBridge
+# import cv2
+# import numpy as np
+
+# class CameraSub(Node):
+
+#     def __init__(self):
+#         super().__init__('line_following_node')
+#         self.camera_sub = self.create_subscription(Image, '/vision_rpi_bot_camera/image_raw', self.camera_cb, 10)
+#         self.bridge = CvBridge()
+#         self.frames = []
+
+#     def camera_cb(self, data):
+#         frame = self.bridge.imgmsg_to_cv2(data, 'bgr8')
+#         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+#         h, w = gray.shape
+#         bytes_per_frame = w * h
+
+#         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+#         thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+
+#         signed_thresh = thresh[-5].astype(np.int16)
+#         diff = np.diff(signed_thresh)
+
+#         points = np.where(np.logical_or(diff > 200, diff < -200))
+
+#         if len(points) > 0 and len(points[0]) > 1:
+#             middle = (points[0][0] + points[0][1]) / 2
+
+#             # Implement your motor control logic here
+#             print("Implement motor control logic with the calculated 'middle' value")
+
+#         else:
+#             # Adjust the following lines according to your requirements
+#             # start_height -= 5
+#             # start_height = start_height % h
+#             print("Line lost, implement necessary logic here")
+
+#         frames.append(frame_rgb)
+#         frames.append(thresh)
+#         if psutil.virtual_memory().percent >= 85:
+#             del frames[0]
+
+# def main(args=None):
+#     rclpy.init(args=args)
+#     sensor_sub = CameraSub()
+#     rclpy.spin(sensor_sub)
+#     sensor_sub.destroy_node()
+#     rclpy.shutdown()
+
+# if __name__ == '__main__':
+#     main()
+
 
 
 # import rclpy
